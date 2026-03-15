@@ -42,9 +42,25 @@ impl WmState {
     /// Falls back to first monitor if not found.
     pub fn add_window(&mut self, hwnd: HWND, monitor_id: isize) {
         let mon_idx = self.find_monitor_by_id(monitor_id).unwrap_or(0);
-        // Always pass Horizontal as root direction. insert() automatically
-        // alternates H/V at each tree level for grid-like layout. (BUG-05)
         self.monitors[mon_idx].tree.insert(hwnd, Direction::Horizontal);
+    }
+
+    /// Add a window to the monitor with the fewest windows (balanced distribution).
+    /// When multiple monitors exist, this ensures ~2 windows per monitor before
+    /// any monitor gets a 3rd.
+    pub fn add_window_balanced(&mut self, hwnd: HWND) {
+        if self.monitors.is_empty() {
+            return;
+        }
+        // Find the monitor with the fewest windows
+        let min_idx = self
+            .monitors
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, m)| m.tree.window_count())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        self.monitors[min_idx].tree.insert(hwnd, Direction::Horizontal);
     }
 
     /// Remove a window from all monitors.
@@ -122,11 +138,14 @@ impl WmState {
             new_monitors.into_iter().map(|(id, area)| Monitor::new(id, area)).collect()
         };
 
-        // Re-assign windows to their correct monitors
+        // Re-assign windows with balanced distribution across monitors
         for hwnd in all_windows {
             if window::is_window_valid(hwnd) {
-                let mon_id = crate::windows_api::monitor::monitor_from_window(hwnd);
-                self.add_window(hwnd, mon_id);
+                if self.monitors.len() > 1 {
+                    self.add_window_balanced(hwnd);
+                } else {
+                    self.add_window(hwnd, 0);
+                }
             }
         }
     }

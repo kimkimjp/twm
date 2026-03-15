@@ -21,11 +21,26 @@ That's it. No shortcuts to memorize, no configuration required.
      2 windows                          3 windows
 ```
 
+## Multi-Monitor
+
+When multiple monitors are detected, windows are automatically distributed **evenly** across monitors — approximately 2 windows per monitor before any monitor gets a 3rd.
+
+```
+  Monitor 1                Monitor 2
+┌──────┬──────┐       ┌──────┬──────┐
+│      │      │       │      │      │
+│ Win1 │ Win2 │       │ Win3 │ Win4 │
+│      │      │       │      │      │
+└──────┴──────┘       └──────┴──────┘
+```
+
+Dragging a window to another monitor is detected and the layout is automatically updated.
+
 ## Features
 
 - **Zero configuration** - Just run the exe, windows auto-tile
 - **BSP layout** - Binary Space Partitioning for balanced splits
-- **Multi-monitor support** - Each monitor tiles independently
+- **Multi-monitor balanced distribution** - Windows spread evenly (~2 per monitor)
 - **DPI-aware** - Correct positioning on high-DPI displays
 - **DWM border compensation** - Pixel-perfect tiling
 - **Lightweight** - ~1.1MB binary, event-driven, near-zero CPU at idle

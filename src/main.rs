@@ -77,10 +77,20 @@ fn main() {
 
     // Add existing visible windows
     let visible_windows = windows_api::window::get_visible_windows();
-    log::info!("Found {} visible windows", visible_windows.len());
+    let multi_monitor = wm_state.monitors.len() > 1;
+    log::info!(
+        "Found {} visible windows, {} monitors ({})",
+        visible_windows.len(),
+        wm_state.monitors.len(),
+        if multi_monitor { "balanced distribution" } else { "single monitor" }
+    );
     for hwnd in visible_windows {
-        let mon_id = windows_api::monitor::monitor_from_window(hwnd);
-        wm_state.add_window(hwnd, mon_id);
+        if multi_monitor {
+            // Distribute evenly: ~2 windows per monitor before any gets a 3rd
+            wm_state.add_window_balanced(hwnd);
+        } else {
+            wm_state.add_window(hwnd, 0);
+        }
     }
 
     // Apply initial layout
@@ -158,8 +168,11 @@ fn main() {
                         if windows_api::window::is_manageable(hwnd)
                             && !wm_state.has_window(hwnd)
                         {
-                            let mon_id = windows_api::monitor::monitor_from_window(hwnd);
-                            wm_state.add_window(hwnd, mon_id);
+                            if multi_monitor {
+                                wm_state.add_window_balanced(hwnd);
+                            } else {
+                                wm_state.add_window(hwnd, 0);
+                            }
                             wm_state.apply_all_layouts();
                             log::info!("Window added: {:?}", hwnd);
                         }
@@ -172,15 +185,14 @@ fn main() {
                         }
                     }
                     windows_api::event_hook::WindowEvent::FocusChange(hwnd) => {
-                        // A window came to the foreground. If it's a new
-                        // manageable window we haven't seen yet, tile it.
-                        // This catches apps that don't fire EVENT_OBJECT_SHOW
-                        // reliably (e.g., some UWP apps, electron apps).
                         if windows_api::window::is_manageable(hwnd)
                             && !wm_state.has_window(hwnd)
                         {
-                            let mon_id = windows_api::monitor::monitor_from_window(hwnd);
-                            wm_state.add_window(hwnd, mon_id);
+                            if multi_monitor {
+                                wm_state.add_window_balanced(hwnd);
+                            } else {
+                                wm_state.add_window(hwnd, 0);
+                            }
                             wm_state.apply_all_layouts();
                             log::info!("Window added (via focus): {:?}", hwnd);
                         }
