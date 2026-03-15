@@ -49,6 +49,17 @@ cargo build --release --target x86_64-pc-windows-gnu
 
 The binary will be at `target/release/twm.exe` (or `target/x86_64-pc-windows-gnu/release/twm.exe` for cross-compilation).
 
+## Uninstallation
+
+twm is a single portable executable with no installer. To uninstall:
+
+1. **Stop twm** - Press `Alt+Shift+E` to exit, or end `twm.exe` from Task Manager
+2. **Delete the executable** - Remove `twm.exe` from wherever you placed it
+3. **Remove auto-start** (if configured) - Press `Win+R`, type `shell:startup`, and delete the twm shortcut
+4. **Remove config** (optional) - Delete the folder `%APPDATA%\twm\` (typically `C:\Users\<name>\AppData\Roaming\twm\`)
+
+No registry entries are created. No system files are modified.
+
 ## Default Keybindings
 
 `Mod` = `Alt` key by default.
