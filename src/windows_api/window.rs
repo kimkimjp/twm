@@ -7,20 +7,11 @@ use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
 };
-use windows::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentThreadId,
-};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_KEYUP, VK_MENU,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    IsWindowVisible, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, GWL_STYLE, GW_OWNER, SET_WINDOW_POS_FLAGS, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+    GetWindowTextW, IsIconic, IsWindow, IsWindowVisible, IsZoomed, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, GW_OWNER, SET_WINDOW_POS_FLAGS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER,
+    SW_HIDE, SW_RESTORE, SW_SHOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// Enumerates all visible, manageable top-level windows.
@@ -188,6 +179,19 @@ fn get_border_compensation(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) -> (i32, 
     let border_top = frame_rect.top - window_rect.top;
     let border_bottom = window_rect.bottom - frame_rect.bottom;
 
+    // Sanity check: if borders are unreasonable (e.g. window just restored,
+    // minimized coords like -32000, or DWM animation in progress), use
+    // Windows 10/11 standard invisible border of 7px. (BUG-09)
+    let max_border = 20; // no invisible border should exceed 20px
+    if border_left.abs() > max_border
+        || border_right.abs() > max_border
+        || border_top.abs() > max_border
+        || border_bottom.abs() > max_border
+    {
+        // Standard Windows 10/11 invisible border: 7px left/right/bottom, 0px top
+        return (x - 7, y, w + 14, h + 7);
+    }
+
     // Expand the SetWindowPos rect to compensate for invisible borders
     (
         x - border_left,
@@ -195,36 +199,6 @@ fn get_border_compensation(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) -> (i32, 
         w + border_left + border_right,
         h + border_top + border_bottom,
     )
-}
-
-/// Gets the accurate window bounds using DWM extended frame bounds.
-/// Falls back to GetWindowRect if DWM query fails.
-pub fn get_window_rect(hwnd: HWND) -> Option<RECT> {
-    let mut rect = RECT::default();
-
-    // Try DWM extended frame bounds first (excludes invisible borders)
-    let result = unsafe {
-        DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_EXTENDED_FRAME_BOUNDS,
-            &mut rect as *mut RECT as *mut _,
-            mem::size_of::<RECT>() as u32,
-        )
-    };
-
-    if result.is_ok() {
-        return Some(rect);
-    }
-
-    // Fallback to GetWindowRect
-    unsafe {
-        if GetWindowRect(hwnd, &mut rect).is_ok() {
-            Some(rect)
-        } else {
-            log::warn!("GetWindowRect failed for {:?}", hwnd);
-            None
-        }
-    }
 }
 
 /// Returns the window title text.
@@ -247,42 +221,6 @@ pub fn get_window_class(hwnd: HWND) -> String {
         let mut buf = [0u16; 256];
         let len = GetClassNameW(hwnd, &mut buf);
         String::from_utf16_lossy(&buf[..len as usize])
-    }
-}
-
-/// Sends WM_CLOSE to request the window to close gracefully.
-pub fn close_window(hwnd: HWND) {
-    unsafe {
-        use windows::Win32::Foundation::{WPARAM, LPARAM};
-        if let Err(e) = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) {
-            log::warn!("PostMessageW(WM_CLOSE) failed for {:?}: {}", hwnd, e);
-        }
-    }
-}
-
-/// Brings the window to the foreground.
-///
-/// Uses AttachThreadInput trick to bypass Windows' SetForegroundWindow
-/// restrictions. Without this, SetForegroundWindow silently fails when
-/// our process doesn't currently own the foreground.
-pub fn set_foreground(hwnd: HWND) {
-    unsafe {
-        let current_thread = GetCurrentThreadId();
-        let foreground_hwnd = GetForegroundWindow();
-
-        if foreground_hwnd.0 as isize != 0 {
-            let foreground_thread = GetWindowThreadProcessId(foreground_hwnd, None);
-
-            if foreground_thread != current_thread {
-                // Attach to the foreground thread's input to gain permission
-                let _ = AttachThreadInput(current_thread, foreground_thread, true);
-                let _ = SetForegroundWindow(hwnd);
-                let _ = AttachThreadInput(current_thread, foreground_thread, false);
-                return;
-            }
-        }
-
-        let _ = SetForegroundWindow(hwnd);
     }
 }
 

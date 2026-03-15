@@ -109,7 +109,7 @@ unsafe extern "system" fn win_event_proc(
         _ => return,
     };
 
-    if let Ok(mut queue) = EVENTS.lock() {
-        queue.push(window_event);
-    }
+    // Use same poisoning recovery strategy as drain_events() (BUG-11)
+    let mut queue = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
+    queue.push(window_event);
 }

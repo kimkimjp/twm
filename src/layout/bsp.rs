@@ -41,11 +41,15 @@ impl BspNode {
         BspNode::Empty
     }
 
-    /// ウィンドウを挿入する。
+    /// ウィンドウを挿入する。重複は無視する。(BUG-07)
     /// - Empty なら Leaf に変換
     /// - Leaf なら Split に変換して既存ウィンドウと新ウィンドウを配置
     /// - Split なら少ない方のサブツリーに挿入（バランスド）
     pub fn insert(&mut self, hwnd: HWND, direction: Direction) -> &mut Self {
+        // Prevent duplicate insertion (BUG-07)
+        if self.find_window(hwnd) {
+            return self;
+        }
         match self {
             BspNode::Empty => {
                 *self = BspNode::Leaf { hwnd };
@@ -204,108 +208,6 @@ impl BspNode {
                 windows.extend(second.get_windows());
                 windows
             }
-        }
-    }
-
-    /// 指定方向の隣接ウィンドウを返す（フォーカス移動用）。
-    /// forward=true は右/下、false は左/上。
-    pub fn get_adjacent(&self, hwnd: HWND, dir: Direction, forward: bool) -> Option<HWND> {
-        let windows = self.get_windows();
-        if windows.is_empty() {
-            return None;
-        }
-
-        // Find the current window's index
-        let _pos = windows.iter().position(|w| w.0 == hwnd.0)?;
-
-        // For BSP trees, windows are laid out in order.
-        // Horizontal splits: left-to-right in windows list
-        // Vertical splits: top-to-bottom in windows list
-        // Use the flat list for adjacency based on direction.
-        // We need to use the layout to determine spatial adjacency.
-        // For simplicity and correctness, compute a dummy layout and find spatial neighbors.
-        let dummy_area = Rect {
-            x: 0,
-            y: 0,
-            w: 10000,
-            h: 10000,
-        };
-        let placements = self.calculate_layout(dummy_area, 0);
-
-        // Find current window placement
-        let current = placements.iter().find(|p| p.hwnd.0 == hwnd.0)?;
-        let cx = current.rect.x + current.rect.w / 2;
-        let cy = current.rect.y + current.rect.h / 2;
-
-        // Find the nearest window in the specified direction
-        let mut best: Option<(HWND, i32)> = None;
-
-        for p in &placements {
-            if p.hwnd.0 == hwnd.0 {
-                continue;
-            }
-            let px = p.rect.x + p.rect.w / 2;
-            let py = p.rect.y + p.rect.h / 2;
-
-            let is_valid = match (dir, forward) {
-                (Direction::Horizontal, true) => px > cx,  // right
-                (Direction::Horizontal, false) => px < cx, // left
-                (Direction::Vertical, true) => py > cy,    // down
-                (Direction::Vertical, false) => py < cy,   // up
-            };
-
-            if !is_valid {
-                continue;
-            }
-
-            let dist = (px - cx).abs() + (py - cy).abs();
-            match best {
-                None => best = Some((p.hwnd, dist)),
-                Some((_, best_dist)) if dist < best_dist => {
-                    best = Some((p.hwnd, dist));
-                }
-                _ => {}
-            }
-        }
-
-        best.map(|(hwnd, _)| hwnd)
-    }
-
-    /// 2つのウィンドウの位置を交換（ウィンドウ移動用）
-    pub fn swap_windows(&mut self, a: HWND, b: HWND) {
-        // Collect mutable pointers to the HWND values we need to swap
-        let mut found_a: Option<*mut HWND> = None;
-        let mut found_b: Option<*mut HWND> = None;
-        Self::find_hwnd_ptrs(self, a, b, &mut found_a, &mut found_b);
-
-        if let (Some(pa), Some(pb)) = (found_a, found_b) {
-            unsafe {
-                std::ptr::swap(pa, pb);
-            }
-        }
-    }
-
-    /// Helper to find mutable pointers to two HWNDs in the tree
-    fn find_hwnd_ptrs(
-        node: &mut BspNode,
-        a: HWND,
-        b: HWND,
-        found_a: &mut Option<*mut HWND>,
-        found_b: &mut Option<*mut HWND>,
-    ) {
-        match node {
-            BspNode::Leaf { hwnd } => {
-                if hwnd.0 == a.0 {
-                    *found_a = Some(hwnd as *mut HWND);
-                } else if hwnd.0 == b.0 {
-                    *found_b = Some(hwnd as *mut HWND);
-                }
-            }
-            BspNode::Split { first, second, .. } => {
-                Self::find_hwnd_ptrs(first, a, b, found_a, found_b);
-                Self::find_hwnd_ptrs(second, a, b, found_a, found_b);
-            }
-            BspNode::Empty => {}
         }
     }
 

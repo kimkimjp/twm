@@ -42,10 +42,9 @@ impl WmState {
     /// Falls back to first monitor if not found.
     pub fn add_window(&mut self, hwnd: HWND, monitor_id: isize) {
         let mon_idx = self.find_monitor_by_id(monitor_id).unwrap_or(0);
-        // Alternate split direction based on window count for balanced layout
-        let count = self.monitors[mon_idx].tree.window_count();
-        let dir = if count % 2 == 0 { Direction::Horizontal } else { Direction::Vertical };
-        self.monitors[mon_idx].tree.insert(hwnd, dir);
+        // Always pass Horizontal as root direction. insert() automatically
+        // alternates H/V at each tree level for grid-like layout. (BUG-05)
+        self.monitors[mon_idx].tree.insert(hwnd, Direction::Horizontal);
     }
 
     /// Remove a window from all monitors.
@@ -142,12 +141,8 @@ impl WmState {
 
         if let Some(current) = current_mon_idx {
             if current != new_mon_idx {
-                // Remove from old monitor
                 self.monitors[current].tree.remove(hwnd);
-                // Add to new monitor
-                let count = self.monitors[new_mon_idx].tree.window_count();
-                let dir = if count % 2 == 0 { Direction::Horizontal } else { Direction::Vertical };
-                self.monitors[new_mon_idx].tree.insert(hwnd, dir);
+                self.monitors[new_mon_idx].tree.insert(hwnd, Direction::Horizontal);
             }
         }
     }

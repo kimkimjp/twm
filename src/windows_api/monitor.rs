@@ -3,9 +3,6 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFO,
     MONITOR_DEFAULTTONEAREST,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    SystemParametersInfoW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-};
 
 /// A simple rectangle representing position and size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,33 +31,6 @@ pub struct MonitorInfo {
     pub id: isize,
     /// Work area excluding the taskbar.
     pub work_area: Rect,
-}
-
-/// Returns the work area of the primary monitor (excludes the taskbar).
-pub fn get_work_area() -> RECT {
-    let mut rect = RECT::default();
-
-    unsafe {
-        let result = SystemParametersInfoW(
-            SPI_GETWORKAREA,
-            0,
-            Some(&mut rect as *mut RECT as *mut _),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        );
-
-        if let Err(e) = result {
-            log::warn!("SystemParametersInfoW(SPI_GETWORKAREA) failed: {}", e);
-            // Return a sensible default (full HD) on failure
-            rect = RECT {
-                left: 0,
-                top: 0,
-                right: 1920,
-                bottom: 1080,
-            };
-        }
-    }
-
-    rect
 }
 
 /// Enumerates all monitors and returns their work areas, sorted left-to-right by x coordinate.
