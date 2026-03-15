@@ -9,6 +9,9 @@ A lightweight tiling window manager for Windows 10/11, inspired by [i3wm](https:
 - **9 workspaces per monitor** - Switch between virtual workspaces with keyboard shortcuts
 - **i3-compatible keybindings** - Familiar shortcuts for i3 users
 - **YAML configuration** - Easy to customize keybindings, gaps, and window rules
+- **Low-level keyboard hook** - Intercepts shortcuts before Windows processes them (no conflicts with OS shortcuts)
+- **DPI-aware** - Correct window positioning on high-DPI displays
+- **DWM border compensation** - Pixel-perfect tiling with no gaps between windows
 - **Lightweight** - ~1.2MB binary, minimal memory footprint, event-driven (near-zero CPU at idle)
 - **Window rules** - Auto-float specific windows by class name or title
 
@@ -187,14 +190,17 @@ window_rules:
 ```
 twm.exe (single process, event-driven)
   |
-  +-- Hotkey Manager (RegisterHotKey)
-  +-- Event Listener (SetWinEventHook)
+  +-- Low-Level Keyboard Hook (WH_KEYBOARD_LL via SetWindowsHookEx)
+  |     Intercepts ALL keyboard input before Windows processes it.
+  |     Matched shortcuts are consumed; unmatched keys pass through.
+  |
+  +-- Event Listener (SetWinEventHook + WINEVENT_OUTOFCONTEXT)
   +-- Window Manager Core
   |     +-- Monitor[] (auto-detected via EnumDisplayMonitors)
   |           +-- Workspace[9] (per monitor)
   |                 +-- BSP Tree (layout engine)
   +-- Config Manager (YAML)
-  +-- Win32 API Layer (abstraction)
+  +-- Win32 API Layer (DPI-aware, DWM border compensation)
 ```
 
 ## Requirements

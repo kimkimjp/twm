@@ -1,49 +1,9 @@
-#[cfg(target_os = "windows")]
-use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
+/// Modifier flags matching windows_api::hotkey constants
+pub const MOD_FLAG_ALT: u8 = 0x01;
+pub const MOD_FLAG_SHIFT: u8 = 0x02;
+pub const MOD_FLAG_CTRL: u8 = 0x04;
 
-/// Hotkey binding: an id, modifier+key combo, and the command string.
-#[derive(Debug, Clone)]
-pub struct HotkeyBinding {
-    pub id: i32,
-    #[cfg(target_os = "windows")]
-    pub modifiers: HOT_KEY_MODIFIERS,
-    #[cfg(not(target_os = "windows"))]
-    pub modifiers: u32,
-    pub vk: u32,
-    pub command: String,
-}
-
-// Windows constants for modifier keys
-#[cfg(target_os = "windows")]
-mod platform {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT,
-    };
-
-    pub const MODIFIER_ALT: HOT_KEY_MODIFIERS = MOD_ALT;
-    pub const MODIFIER_SHIFT: HOT_KEY_MODIFIERS = MOD_SHIFT;
-    pub const MODIFIER_CONTROL: HOT_KEY_MODIFIERS = MOD_CONTROL;
-    pub const MODIFIER_NOREPEAT: HOT_KEY_MODIFIERS = MOD_NOREPEAT;
-
-    pub fn combine_modifiers(a: HOT_KEY_MODIFIERS, b: HOT_KEY_MODIFIERS) -> HOT_KEY_MODIFIERS {
-        HOT_KEY_MODIFIERS(a.0 | b.0)
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-mod platform {
-    // Stub values matching Windows constants for cross-platform compilation
-    pub const MODIFIER_ALT: u32 = 0x0001;
-    pub const MODIFIER_SHIFT: u32 = 0x0004;
-    pub const MODIFIER_CONTROL: u32 = 0x0002;
-    pub const MODIFIER_NOREPEAT: u32 = 0x4000;
-
-    pub fn combine_modifiers(a: u32, b: u32) -> u32 {
-        a | b
-    }
-}
-
-/// Virtual key code constants
+// VK constants
 const VK_RETURN: u32 = 0x0D;
 const VK_ESCAPE: u32 = 0x1B;
 const VK_SPACE: u32 = 0x20;
@@ -52,69 +12,28 @@ const VK_UP: u32 = 0x26;
 const VK_RIGHT: u32 = 0x27;
 const VK_DOWN: u32 = 0x28;
 
-/// Parses a key string like "Mod+H", "Mod+Shift+Q", "Mod+1" into
-/// a (modifiers, virtual_key_code) pair.
+/// Parses a key string like "Mod+H", "Mod+Shift+Q" into (modifiers, vk).
 ///
 /// "Mod" maps to Alt by default.
 /// Returns None if the key string cannot be parsed.
-#[cfg(target_os = "windows")]
-pub fn parse_key_string(key: &str) -> Option<(HOT_KEY_MODIFIERS, u32)> {
+pub fn parse_key_string(key: &str) -> Option<(u8, u32)> {
     let tokens: Vec<&str> = key.split('+').collect();
     if tokens.is_empty() {
         return None;
     }
 
-    let mut modifiers = HOT_KEY_MODIFIERS(0);
-
-    // All tokens except the last are modifiers
+    let mut modifiers: u8 = 0;
     for &token in &tokens[..tokens.len() - 1] {
         match token.trim() {
-            "Mod" => modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_ALT),
-            "Shift" => modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_SHIFT),
-            "Ctrl" | "Control" => {
-                modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_CONTROL)
-            }
+            "Mod" => modifiers |= MOD_FLAG_ALT,
+            "Shift" => modifiers |= MOD_FLAG_SHIFT,
+            "Ctrl" | "Control" => modifiers |= MOD_FLAG_CTRL,
             _ => {
                 log::warn!("Unknown modifier: {}", token);
                 return None;
             }
         }
     }
-
-    // Add MOD_NOREPEAT
-    modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_NOREPEAT);
-
-    // Last token is the key
-    let key_token = tokens.last()?.trim();
-    let vk = parse_vk(key_token)?;
-
-    Some((modifiers, vk))
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn parse_key_string(key: &str) -> Option<(u32, u32)> {
-    let tokens: Vec<&str> = key.split('+').collect();
-    if tokens.is_empty() {
-        return None;
-    }
-
-    let mut modifiers: u32 = 0;
-
-    for &token in &tokens[..tokens.len() - 1] {
-        match token.trim() {
-            "Mod" => modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_ALT),
-            "Shift" => modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_SHIFT),
-            "Ctrl" | "Control" => {
-                modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_CONTROL)
-            }
-            _ => {
-                log::warn!("Unknown modifier: {}", token);
-                return None;
-            }
-        }
-    }
-
-    modifiers = platform::combine_modifiers(modifiers, platform::MODIFIER_NOREPEAT);
 
     let key_token = tokens.last()?.trim();
     let vk = parse_vk(key_token)?;
@@ -171,8 +90,8 @@ fn parse_vk(key: &str) -> Option<u32> {
         "Up" => Some(VK_UP),
         "Right" => Some(VK_RIGHT),
         "Down" => Some(VK_DOWN),
-        "Comma" => Some(0xBC),   // VK_OEM_COMMA
-        "Period" => Some(0xBE),  // VK_OEM_PERIOD
+        "Comma" => Some(0xBC),  // VK_OEM_COMMA
+        "Period" => Some(0xBE), // VK_OEM_PERIOD
         _ => {
             log::warn!("Unknown key: {}", key);
             None

@@ -7,14 +7,14 @@ mod wm;
 
 #[cfg(target_os = "windows")]
 fn main() {
-    use config::keybinding::{parse_key_string, HotkeyBinding};
+    use config::keybinding::parse_key_string;
     use config::parser::{get_default_keybindings, load_config};
     use layout::bsp::Direction;
     use wm::commands::{parse_command, WmCommand};
     use wm::state::WmState;
 
     use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetMessageW, PostQuitMessage, TranslateMessage, MSG, WM_HOTKEY,
+        DispatchMessageW, GetMessageW, PostQuitMessage, TranslateMessage, MSG,
     };
 
     env_logger::init();
@@ -42,20 +42,23 @@ fn main() {
         config.keybindings
     };
 
-    // Parse keybindings into HotkeyBindings
-    let mut hotkey_bindings: Vec<HotkeyBinding> = Vec::new();
-    for (i, entry) in keybinding_entries.iter().enumerate() {
+    // Parse keybindings into KeyBinding for the low-level hook
+    let mut bindings: Vec<windows_api::hotkey::KeyBinding> = Vec::new();
+    for entry in &keybinding_entries {
         if let Some((modifiers, vk)) = parse_key_string(&entry.key) {
-            hotkey_bindings.push(HotkeyBinding {
-                id: (i + 1) as i32,
+            bindings.push(windows_api::hotkey::KeyBinding {
                 modifiers,
                 vk,
                 command: entry.command.clone(),
             });
+            log::info!("Keybinding: {} -> {}", entry.key, entry.command);
         } else {
             log::warn!("Failed to parse keybinding: {}", entry.key);
         }
     }
+
+    // Install low-level keyboard hook (replaces RegisterHotKey)
+    windows_api::hotkey::install_hook(bindings);
 
     // Enumerate monitors
     let monitor_infos = windows_api::monitor::enumerate_monitors();
@@ -90,21 +93,6 @@ fn main() {
     let _hooks = windows_api::event_hook::setup_event_hooks();
     log::info!("Event hooks installed");
 
-    // Register hotkeys
-    for binding in &hotkey_bindings {
-        if windows_api::hotkey::register_hotkey(binding.id, binding.modifiers, binding.vk) {
-            log::info!(
-                "Registered hotkey id={}: {} -> {}",
-                binding.id,
-                keybinding_entries
-                    .get((binding.id - 1) as usize)
-                    .map(|e| e.key.as_str())
-                    .unwrap_or("?"),
-                binding.command
-            );
-        }
-    }
-
     // Add existing visible windows
     let visible_windows = windows_api::window::get_visible_windows();
     log::info!("Found {} visible windows", visible_windows.len());
@@ -128,17 +116,16 @@ fn main() {
                 break;
             }
 
-            if msg.message == WM_HOTKEY {
-                let hotkey_id = msg.wParam.0 as i32;
-                if let Some(binding) = hotkey_bindings.iter().find(|b| b.id == hotkey_id) {
-                    log::info!("Hotkey pressed: {}", binding.command);
-                    if let Some(cmd) = parse_command(&binding.command) {
-                        execute_command(&mut wm_state, cmd);
-                    }
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+
+            // Process hotkey commands from the low-level keyboard hook
+            let commands = windows_api::hotkey::drain_commands();
+            for cmd_str in commands {
+                log::info!("Hotkey: {}", cmd_str);
+                if let Some(cmd) = parse_command(&cmd_str) {
+                    execute_command(&mut wm_state, cmd);
                 }
-            } else {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
             }
 
             // Drain event queue and process window events
@@ -173,10 +160,8 @@ fn main() {
         }
     }
 
-    // Unregister hotkeys on exit
-    for binding in &hotkey_bindings {
-        windows_api::hotkey::unregister_hotkey(binding.id);
-    }
+    // Uninstall keyboard hook on exit
+    windows_api::hotkey::uninstall_hook();
     log::info!("twm exiting");
 }
 
