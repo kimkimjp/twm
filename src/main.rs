@@ -47,19 +47,34 @@ fn main() {
         }
     }
 
-    // Get work area
-    let wa = windows_api::monitor::get_work_area();
-    let work_area = layout::bsp::Rect {
-        x: wa.left,
-        y: wa.top,
-        w: wa.right - wa.left,
-        h: wa.bottom - wa.top,
-    };
-    log::info!("Work area: {:?}", work_area);
+    // Enumerate monitors
+    let monitor_infos = windows_api::monitor::enumerate_monitors();
+    log::info!("Found {} monitors", monitor_infos.len());
+    for (i, mi) in monitor_infos.iter().enumerate() {
+        log::info!("  Monitor {}: id={}, area={:?}", i, mi.id, mi.work_area);
+    }
+
+    let monitor_data: Vec<(isize, layout::bsp::Rect)> = monitor_infos
+        .iter()
+        .map(|mi| {
+            (
+                mi.id,
+                layout::bsp::Rect {
+                    x: mi.work_area.x,
+                    y: mi.work_area.y,
+                    w: mi.work_area.w,
+                    h: mi.work_area.h,
+                },
+            )
+        })
+        .collect();
 
     // Initialize WM state
-    let mut wm_state =
-        WmState::new(work_area, config.general.gaps.inner, config.general.gaps.outer);
+    let mut wm_state = WmState::new(
+        monitor_data,
+        config.general.gaps.inner,
+        config.general.gaps.outer,
+    );
 
     // Set up event hooks
     let _hooks = windows_api::event_hook::setup_event_hooks();
@@ -84,11 +99,12 @@ fn main() {
     let visible_windows = windows_api::window::get_visible_windows();
     log::info!("Found {} visible windows", visible_windows.len());
     for hwnd in visible_windows {
-        wm_state.add_window(hwnd);
+        let mon_id = windows_api::monitor::monitor_from_window(hwnd);
+        wm_state.add_window_to_monitor(hwnd, mon_id);
     }
 
     // Apply initial layout
-    wm_state.apply_layout();
+    wm_state.apply_all_layouts();
     log::info!("Initial layout applied");
 
     // Win32 message loop
@@ -123,19 +139,23 @@ fn main() {
                         if windows_api::window::is_manageable(hwnd)
                             && wm_state.find_workspace_for_window(hwnd).is_none()
                         {
-                            wm_state.add_window(hwnd);
-                            wm_state.apply_layout();
+                            let mon_id = windows_api::monitor::monitor_from_window(hwnd);
+                            wm_state.add_window_to_monitor(hwnd, mon_id);
+                            wm_state.apply_all_layouts();
                         }
                     }
                     windows_api::event_hook::WindowEvent::Destroy(hwnd) => {
                         if wm_state.find_workspace_for_window(hwnd).is_some() {
                             wm_state.remove_window(hwnd);
-                            wm_state.apply_layout();
+                            wm_state.apply_all_layouts();
                         }
                     }
                     windows_api::event_hook::WindowEvent::FocusChange(hwnd) => {
-                        if wm_state.find_workspace_for_window(hwnd).is_some() {
+                        if let Some((mon_idx, _ws_idx)) =
+                            wm_state.find_workspace_for_window(hwnd)
+                        {
                             wm_state.focused_window = Some(hwnd);
+                            wm_state.active_monitor = mon_idx;
                         }
                     }
                 }
@@ -186,6 +206,10 @@ fn execute_command(wm_state: &mut wm::state::WmState, cmd: wm::commands::WmComma
                 Direction::Vertical => Direction::Horizontal,
             };
         }
+        WmCommand::FocusMonitorNext => wm_state.focus_monitor_next(),
+        WmCommand::FocusMonitorPrev => wm_state.focus_monitor_prev(),
+        WmCommand::MoveToMonitorNext => wm_state.move_to_monitor_next(),
+        WmCommand::MoveToMonitorPrev => wm_state.move_to_monitor_prev(),
         WmCommand::Exec(cmd_str) => {
             log::info!("Executing: {}", cmd_str);
             if let Err(e) = std::process::Command::new("cmd")

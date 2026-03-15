@@ -13,6 +13,10 @@ pub enum WmCommand {
     Close,
     ToggleFullscreen,
     ToggleSplitDirection,
+    FocusMonitorNext,
+    FocusMonitorPrev,
+    MoveToMonitorNext,
+    MoveToMonitorPrev,
     Exec(String),
     ReloadConfig,
     Exit,
@@ -35,6 +39,10 @@ pub fn parse_command(s: &str) -> Option<WmCommand> {
         "split_toggle" => Some(WmCommand::ToggleSplitDirection),
         "reload" => Some(WmCommand::ReloadConfig),
         "exit" => Some(WmCommand::Exit),
+        "focus_monitor next" => Some(WmCommand::FocusMonitorNext),
+        "focus_monitor prev" => Some(WmCommand::FocusMonitorPrev),
+        "move_to_monitor next" => Some(WmCommand::MoveToMonitorNext),
+        "move_to_monitor prev" => Some(WmCommand::MoveToMonitorPrev),
         _ => {
             // workspace 1~9
             if let Some(num_str) = s.strip_prefix("workspace ") {

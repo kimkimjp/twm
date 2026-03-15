@@ -161,6 +161,12 @@ pub fn get_default_keybindings() -> Vec<KeybindingEntry> {
     bindings.push(kb("Mod+Shift+E", "exit"));
     bindings.push(kb("Mod+Shift+C", "reload"));
 
+    // Monitor focus/move
+    bindings.push(kb("Mod+Comma", "focus_monitor prev"));
+    bindings.push(kb("Mod+Period", "focus_monitor next"));
+    bindings.push(kb("Mod+Shift+Comma", "move_to_monitor prev"));
+    bindings.push(kb("Mod+Shift+Period", "move_to_monitor next"));
+
     bindings
 }
 

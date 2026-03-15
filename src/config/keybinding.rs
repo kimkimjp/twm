@@ -171,6 +171,8 @@ fn parse_vk(key: &str) -> Option<u32> {
         "Up" => Some(VK_UP),
         "Right" => Some(VK_RIGHT),
         "Down" => Some(VK_DOWN),
+        "Comma" => Some(0xBC),   // VK_OEM_COMMA
+        "Period" => Some(0xBE),  // VK_OEM_PERIOD
         _ => {
             log::warn!("Unknown key: {}", key);
             None
