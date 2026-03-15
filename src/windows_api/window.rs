@@ -12,11 +12,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
     IsWindowVisible, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, SET_WINDOW_POS_FLAGS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER,
-    SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GWL_EXSTYLE, GWL_STYLE, GW_OWNER, SET_WINDOW_POS_FLAGS, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW,
 };
 
 /// Enumerates all visible, manageable top-level windows.
@@ -45,8 +46,15 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
 
 /// Determines whether a window should be managed by the tiling WM.
 ///
-/// Filters out: invisible windows, tool windows, non-activatable windows,
-/// windows with empty titles, and cloaked (virtual-desktop-hidden) windows.
+/// Uses the same heuristic as the Windows taskbar to decide which windows
+/// are "app windows" that should appear as tiles:
+/// 1. Must be visible
+/// 2. Must NOT have an owner window (dialogs, property sheets, etc. have owners)
+/// 3. If it has WS_EX_APPWINDOW, always include it (explicit app window)
+/// 4. Must NOT be WS_EX_TOOLWINDOW (floating toolbars, palettes)
+/// 5. Must NOT be WS_EX_NOACTIVATE (non-interactive overlays)
+/// 6. Must have a non-empty title
+/// 7. Must NOT be cloaked (hidden by virtual desktop or UWP)
 pub fn is_manageable(hwnd: HWND) -> bool {
     unsafe {
         // Must be visible
@@ -57,10 +65,28 @@ pub fn is_manageable(hwnd: HWND) -> bool {
         // Check extended styles
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
 
-        if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        // WS_EX_APPWINDOW: explicitly marked as an app window — always manage
+        let is_app_window = ex_style & WS_EX_APPWINDOW.0 != 0;
+
+        // Check owner window: owned windows (dialogs, save-as, etc.) should NOT be tiled.
+        // GetWindow(GW_OWNER) returns the owner. If non-null, this is an owned window.
+        let owner = GetWindow(hwnd, GW_OWNER);
+        let has_owner = match owner {
+            Ok(h) => h.0 as isize != 0,
+            Err(_) => false,
+        };
+
+        // Owned windows are excluded UNLESS they have WS_EX_APPWINDOW
+        if has_owner && !is_app_window {
             return false;
         }
 
+        // Tool windows are excluded UNLESS they have WS_EX_APPWINDOW
+        if ex_style & WS_EX_TOOLWINDOW.0 != 0 && !is_app_window {
+            return false;
+        }
+
+        // Non-activatable windows (overlays, HUDs) are always excluded
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
             return false;
         }

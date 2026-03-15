@@ -103,8 +103,19 @@ fn main() {
                             log::info!("Window removed: {:?}", hwnd);
                         }
                     }
-                    windows_api::event_hook::WindowEvent::FocusChange(_) => {
-                        // No action needed — just auto-tile
+                    windows_api::event_hook::WindowEvent::FocusChange(hwnd) => {
+                        // A window came to the foreground. If it's a new
+                        // manageable window we haven't seen yet, tile it.
+                        // This catches apps that don't fire EVENT_OBJECT_SHOW
+                        // reliably (e.g., some UWP apps, electron apps).
+                        if windows_api::window::is_manageable(hwnd)
+                            && !wm_state.has_window(hwnd)
+                        {
+                            let mon_id = windows_api::monitor::monitor_from_window(hwnd);
+                            wm_state.add_window(hwnd, mon_id);
+                            wm_state.apply_all_layouts();
+                            log::info!("Window added (via focus): {:?}", hwnd);
+                        }
                     }
                 }
             }

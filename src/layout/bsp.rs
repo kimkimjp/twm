@@ -44,7 +44,7 @@ impl BspNode {
     /// ウィンドウを挿入する。
     /// - Empty なら Leaf に変換
     /// - Leaf なら Split に変換して既存ウィンドウと新ウィンドウを配置
-    /// - Split なら second に再帰的に挿入
+    /// - Split なら少ない方のサブツリーに挿入（バランスド）
     pub fn insert(&mut self, hwnd: HWND, direction: Direction) -> &mut Self {
         match self {
             BspNode::Empty => {
@@ -61,8 +61,24 @@ impl BspNode {
                     second: Box::new(BspNode::Leaf { hwnd }),
                 };
             }
-            BspNode::Split { second, .. } => {
-                second.insert(hwnd, direction);
+            BspNode::Split {
+                first,
+                second,
+                direction: split_dir,
+                ..
+            } => {
+                // Insert into the subtree with fewer windows for balanced layout.
+                // This ensures 3 windows get ~33% each instead of 50/25/25.
+                // Alternate direction at each level for grid-like layout.
+                let next_dir = match *split_dir {
+                    Direction::Horizontal => Direction::Vertical,
+                    Direction::Vertical => Direction::Horizontal,
+                };
+                if first.window_count() <= second.window_count() {
+                    first.insert(hwnd, next_dir);
+                } else {
+                    second.insert(hwnd, next_dir);
+                }
             }
         }
         self
