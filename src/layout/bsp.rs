@@ -140,20 +140,21 @@ impl BspNode {
                 second,
             } => {
                 let half_gap = gap / 2;
+                let remainder = gap - half_gap * 2; // handle odd gap values
                 let (first_area, second_area) = match direction {
                     Direction::Horizontal => {
                         let split_w = ((area.w as f32) * ratio) as i32;
                         let first_rect = Rect {
                             x: area.x,
                             y: area.y,
-                            w: split_w - half_gap,
-                            h: area.h,
+                            w: (split_w - half_gap).max(1),
+                            h: area.h.max(1),
                         };
                         let second_rect = Rect {
-                            x: area.x + split_w + half_gap,
+                            x: area.x + split_w + half_gap + remainder,
                             y: area.y,
-                            w: area.w - split_w - half_gap,
-                            h: area.h,
+                            w: (area.w - split_w - half_gap - remainder).max(1),
+                            h: area.h.max(1),
                         };
                         (first_rect, second_rect)
                     }
@@ -162,14 +163,14 @@ impl BspNode {
                         let first_rect = Rect {
                             x: area.x,
                             y: area.y,
-                            w: area.w,
-                            h: split_h - half_gap,
+                            w: area.w.max(1),
+                            h: (split_h - half_gap).max(1),
                         };
                         let second_rect = Rect {
                             x: area.x,
-                            y: area.y + split_h + half_gap,
-                            w: area.w,
-                            h: area.h - split_h - half_gap,
+                            y: area.y + split_h + half_gap + remainder,
+                            w: area.w.max(1),
+                            h: (area.h - split_h - half_gap - remainder).max(1),
                         };
                         (first_rect, second_rect)
                     }

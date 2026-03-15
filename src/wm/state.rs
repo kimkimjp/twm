@@ -20,7 +20,7 @@ impl Monitor {
 }
 
 /// Auto-tiling window manager state. No workspaces, no shortcuts.
-/// Just: window appears → tile it; window disappears → re-tile.
+/// Just: window appears -> tile it; window disappears -> re-tile.
 pub struct WmState {
     pub monitors: Vec<Monitor>,
     pub inner_gap: i32,
@@ -62,8 +62,27 @@ impl WmState {
         self.monitors.iter().any(|m| m.tree.find_window(hwnd))
     }
 
+    /// Remove invalid/invisible (zombie) HWNDs from all monitor BSP trees.
+    /// This prevents stale handles from being sent to SetWindowPos.
+    pub fn gc_invalid_windows(&mut self) {
+        for mon in &mut self.monitors {
+            let windows = mon.tree.get_windows();
+            for hwnd in windows {
+                if !window::is_window_valid(hwnd) {
+                    mon.tree.remove(hwnd);
+                }
+            }
+        }
+    }
+
     /// Apply layout on all monitors.
-    pub fn apply_all_layouts(&self) {
+    /// 1. First purges zombie HWNDs (BUG-01/BUG-08)
+    /// 2. Skips minimized windows (BUG-03)
+    /// 3. Does NOT call show_window (BUG-16)
+    pub fn apply_all_layouts(&mut self) {
+        // Purge zombie HWNDs before computing layout
+        self.gc_invalid_windows();
+
         for mon in &self.monitors {
             let effective_area = Rect {
                 x: mon.work_area.x + self.outer_gap,
@@ -75,6 +94,10 @@ impl WmState {
             let placements = mon.tree.calculate_layout(effective_area, self.inner_gap);
 
             for placement in &placements {
+                // Skip minimized windows — don't force-restore them
+                if window::is_window_minimized(placement.hwnd) {
+                    continue;
+                }
                 window::set_window_pos(
                     placement.hwnd,
                     placement.rect.x,
@@ -82,7 +105,49 @@ impl WmState {
                     placement.rect.w,
                     placement.rect.h,
                 );
-                window::show_window(placement.hwnd, true);
+            }
+        }
+    }
+
+    /// Re-enumerate monitors and reassign windows to correct monitors.
+    pub fn refresh_monitors(&mut self, new_monitors: Vec<(isize, Rect)>) {
+        // Collect all tracked windows
+        let all_windows: Vec<HWND> = self.monitors.iter()
+            .flat_map(|m| m.tree.get_windows())
+            .collect();
+
+        // Rebuild monitor list
+        self.monitors = if new_monitors.is_empty() {
+            vec![Monitor::new(0, Rect { x: 0, y: 0, w: 1920, h: 1080 })]
+        } else {
+            new_monitors.into_iter().map(|(id, area)| Monitor::new(id, area)).collect()
+        };
+
+        // Re-assign windows to their correct monitors
+        for hwnd in all_windows {
+            if window::is_window_valid(hwnd) {
+                let mon_id = crate::windows_api::monitor::monitor_from_window(hwnd);
+                self.add_window(hwnd, mon_id);
+            }
+        }
+    }
+
+    /// Move a window to its correct monitor after drag-move (BUG-13).
+    pub fn move_window_to_correct_monitor(&mut self, hwnd: HWND) {
+        let new_mon_id = crate::windows_api::monitor::monitor_from_window(hwnd);
+        let new_mon_idx = self.find_monitor_by_id(new_mon_id).unwrap_or(0);
+
+        // Find which monitor currently tracks this window
+        let current_mon_idx = self.monitors.iter().position(|m| m.tree.find_window(hwnd));
+
+        if let Some(current) = current_mon_idx {
+            if current != new_mon_idx {
+                // Remove from old monitor
+                self.monitors[current].tree.remove(hwnd);
+                // Add to new monitor
+                let count = self.monitors[new_mon_idx].tree.window_count();
+                let dir = if count % 2 == 0 { Direction::Horizontal } else { Direction::Vertical };
+                self.monitors[new_mon_idx].tree.insert(hwnd, dir);
             }
         }
     }

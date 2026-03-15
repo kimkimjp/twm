@@ -6,6 +6,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT,
 };
 
+/// EVENT_SYSTEM_MOVESIZEEND = 0x000B — fired when window move/resize completes
+const EVENT_SYSTEM_MOVESIZEEND: u32 = 0x000B;
+
 /// Events produced by the WinEvent hooks.
 #[derive(Debug, Clone)]
 pub enum WindowEvent {
@@ -15,6 +18,8 @@ pub enum WindowEvent {
     Destroy(HWND),
     /// The foreground window changed.
     FocusChange(HWND),
+    /// A window finished being moved/resized.
+    MoveEnd(HWND),
 }
 
 // HWND is not Send by default, but we only pass them as opaque handles
@@ -42,6 +47,7 @@ pub fn setup_event_hooks() -> Vec<HWINEVENTHOOK> {
         (EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW),
         (EVENT_OBJECT_DESTROY, EVENT_OBJECT_DESTROY),
         (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
+        (EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND),
     ];
 
     for (min, max) in events {
@@ -99,6 +105,7 @@ unsafe extern "system" fn win_event_proc(
         e if e == EVENT_OBJECT_SHOW => WindowEvent::Show(hwnd),
         e if e == EVENT_OBJECT_DESTROY => WindowEvent::Destroy(hwnd),
         e if e == EVENT_SYSTEM_FOREGROUND => WindowEvent::FocusChange(hwnd),
+        e if e == EVENT_SYSTEM_MOVESIZEEND => WindowEvent::MoveEnd(hwnd),
         _ => return,
     };
 

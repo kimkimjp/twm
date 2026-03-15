@@ -1,4 +1,7 @@
 use std::mem;
+use std::sync::OnceLock;
+
+use crate::config::parser::WindowRule;
 
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{
@@ -102,6 +105,11 @@ pub fn is_manageable(hwnd: HWND) -> bool {
             return false;
         }
 
+        // Exclude windows matching "ignore" window rules from config
+        if matches_ignore_rule(hwnd) {
+            return false;
+        }
+
         true
     }
 }
@@ -133,9 +141,9 @@ pub fn set_window_pos(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
         if IsZoomed(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
-        // Restore minimized windows
+        // Skip minimized windows — don't force-restore them
         if IsIconic(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
+            return;
         }
 
         // Compensate for DWM invisible borders.
@@ -289,4 +297,50 @@ pub fn show_window(hwnd: HWND, show: bool) {
         let cmd = if show { SW_SHOW } else { SW_HIDE };
         let _ = ShowWindow(hwnd, cmd);
     }
+}
+
+/// Checks if a window is minimized.
+pub fn is_window_minimized(hwnd: HWND) -> bool {
+    unsafe { IsIconic(hwnd).as_bool() }
+}
+
+/// Global storage for window rules loaded from config.
+static WINDOW_RULES: OnceLock<Vec<WindowRule>> = OnceLock::new();
+
+/// Store window rules for use by is_manageable().
+pub fn set_window_rules(rules: Vec<WindowRule>) {
+    let _ = WINDOW_RULES.set(rules);
+}
+
+/// Check if a window matches any "ignore" window rule.
+fn matches_ignore_rule(hwnd: HWND) -> bool {
+    let rules = match WINDOW_RULES.get() {
+        Some(r) => r,
+        None => return false,
+    };
+
+    // Only evaluate rules that are "ignore" commands
+    let ignore_rules: Vec<&WindowRule> = rules.iter().filter(|r| r.command == "ignore").collect();
+    if ignore_rules.is_empty() {
+        return false;
+    }
+
+    let class = get_window_class(hwnd);
+    let title = get_window_title(hwnd);
+
+    for rule in ignore_rules {
+        let class_match = match &rule.class {
+            Some(pattern) => class.contains(pattern.as_str()),
+            None => true,
+        };
+        let title_match = match &rule.title {
+            Some(pattern) => title.contains(pattern.as_str()),
+            None => true,
+        };
+        if class_match && title_match {
+            return true;
+        }
+    }
+
+    false
 }

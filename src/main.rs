@@ -9,9 +9,21 @@ fn main() {
     use config::parser::load_config;
     use wm::state::WmState;
 
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetMessageW, TranslateMessage, MSG,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassExW,
+        TranslateMessage, CW_USEDEFAULT, MSG, WINDOW_EX_STYLE, WNDCLASSEXW, WS_OVERLAPPED,
     };
+    use windows::core::w;
+
+    unsafe extern "system" fn msg_wnd_proc(
+        hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM,
+    ) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    /// WM_DISPLAYCHANGE = 0x007E
+    const WM_DISPLAYCHANGE: u32 = 0x007E;
 
     env_logger::init();
     log::info!("twm starting — auto-tiling mode");
@@ -27,6 +39,12 @@ fn main() {
     // Load configuration (gaps + window rules only)
     let config = load_config();
     log::info!("Config: gaps inner={}, outer={}", config.gaps.inner, config.gaps.outer);
+
+    // Store window rules for is_manageable() to reference (BUG-15)
+    if !config.window_rules.is_empty() {
+        log::info!("Loaded {} window rules", config.window_rules.len());
+        windows_api::window::set_window_rules(config.window_rules);
+    }
 
     // Enumerate monitors
     let monitor_infos = windows_api::monitor::enumerate_monitors();
@@ -69,6 +87,33 @@ fn main() {
     wm_state.apply_all_layouts();
     log::info!("Initial layout applied");
 
+    // Create a hidden message-only window to receive WM_DISPLAYCHANGE (BUG-12)
+    let _msg_hwnd: HWND = unsafe {
+        let class_name = w!("twm_msg_window");
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(msg_wnd_proc),
+            lpszClassName: class_name,
+            ..Default::default()
+        };
+        RegisterClassExW(&wc);
+
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            class_name,
+            w!("twm"),
+            WS_OVERLAPPED,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        ).unwrap_or(HWND(std::ptr::null_mut()))
+    };
+
     // Message loop — just process window events, no hotkeys
     log::info!("Entering message loop");
     unsafe {
@@ -77,6 +122,29 @@ fn main() {
             let ret = GetMessageW(&mut msg, None, 0, 0);
             if ret.0 <= 0 {
                 break;
+            }
+
+            // Handle WM_DISPLAYCHANGE for monitor configuration changes (BUG-12)
+            if msg.message == WM_DISPLAYCHANGE {
+                log::info!("Display configuration changed, refreshing monitors");
+                let new_monitors = windows_api::monitor::enumerate_monitors();
+                let new_data: Vec<(isize, layout::bsp::Rect)> = new_monitors
+                    .iter()
+                    .map(|mi| {
+                        (
+                            mi.id,
+                            layout::bsp::Rect {
+                                x: mi.work_area.x,
+                                y: mi.work_area.y,
+                                w: mi.work_area.w,
+                                h: mi.work_area.h,
+                            },
+                        )
+                    })
+                    .collect();
+                wm_state.refresh_monitors(new_data);
+                wm_state.apply_all_layouts();
+                log::info!("Monitor refresh complete");
             }
 
             let _ = TranslateMessage(&msg);
@@ -115,6 +183,14 @@ fn main() {
                             wm_state.add_window(hwnd, mon_id);
                             wm_state.apply_all_layouts();
                             log::info!("Window added (via focus): {:?}", hwnd);
+                        }
+                    }
+                    windows_api::event_hook::WindowEvent::MoveEnd(hwnd) => {
+                        // Window finished moving/resizing — check if it crossed monitors (BUG-13)
+                        if wm_state.has_window(hwnd) {
+                            wm_state.move_window_to_correct_monitor(hwnd);
+                            wm_state.apply_all_layouts();
+                            log::info!("Window move completed: {:?}", hwnd);
                         }
                     }
                 }
