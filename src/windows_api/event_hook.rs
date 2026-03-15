@@ -77,11 +77,24 @@ unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,
     hwnd: HWND,
-    _id_object: i32,
-    _id_child: i32,
+    id_object: i32,
+    id_child: i32,
     _id_event_thread: u32,
     _dwms_event_time: u32,
 ) {
+    // OBJID_WINDOW = 0, CHILDID_SELF = 0
+    // Only handle top-level window events, not child elements.
+    // Without this filter, every button/control show/destroy fires an event,
+    // causing massive churn and making the WM unresponsive.
+    if id_object != 0 || id_child != 0 {
+        return;
+    }
+
+    // Skip null/invalid window handles
+    if hwnd.0 as isize == 0 {
+        return;
+    }
+
     let window_event = match event {
         e if e == EVENT_OBJECT_SHOW => WindowEvent::Show(hwnd),
         e if e == EVENT_OBJECT_DESTROY => WindowEvent::Destroy(hwnd),

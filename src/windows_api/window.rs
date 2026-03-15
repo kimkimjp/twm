@@ -4,11 +4,19 @@ use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
 };
+use windows::Win32::System::Threading::{
+    AttachThreadInput, GetCurrentThreadId,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    KEYEVENTF_KEYUP, VK_MENU,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
-    GetWindowTextW, IsWindow, IsWindowVisible, PostMessageW, SetForegroundWindow, SetWindowPos,
-    ShowWindow, GWL_EXSTYLE, SET_WINDOW_POS_FLAGS, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE,
-    SW_SHOW, WM_CLOSE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+    IsWindowVisible, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, SET_WINDOW_POS_FLAGS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER,
+    SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// Enumerates all visible, manageable top-level windows.
@@ -88,13 +96,71 @@ fn is_cloaked(hwnd: HWND) -> bool {
 }
 
 /// Moves and resizes a window without changing Z-order or activation state.
+///
+/// Handles:
+/// - Restoring maximized/minimized windows before repositioning
+/// - Compensating for DWM invisible borders (Windows 10/11)
+/// - Using SWP_FRAMECHANGED to force window frame update
 pub fn set_window_pos(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
-        let flags: SET_WINDOW_POS_FLAGS = SWP_NOZORDER | SWP_NOACTIVATE;
-        if let Err(e) = SetWindowPos(hwnd, None, x, y, w, h, flags) {
+        // Restore maximized windows — SetWindowPos doesn't work on maximized windows
+        if IsZoomed(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        // Restore minimized windows
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+
+        // Compensate for DWM invisible borders.
+        // GetWindowRect returns bounds INCLUDING invisible borders.
+        // DWMWA_EXTENDED_FRAME_BOUNDS returns the VISIBLE bounds.
+        // The difference is the invisible border we need to account for.
+        let (adj_x, adj_y, adj_w, adj_h) = get_border_compensation(hwnd, x, y, w, h);
+
+        let flags: SET_WINDOW_POS_FLAGS = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
+        if let Err(e) = SetWindowPos(hwnd, None, adj_x, adj_y, adj_w, adj_h, flags) {
             log::warn!("SetWindowPos failed for {:?}: {}", hwnd, e);
         }
     }
+}
+
+/// Calculates border compensation to account for DWM invisible borders.
+/// Returns adjusted (x, y, w, h) for SetWindowPos.
+fn get_border_compensation(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) -> (i32, i32, i32, i32) {
+    let mut window_rect = RECT::default();
+    let mut frame_rect = RECT::default();
+
+    unsafe {
+        if GetWindowRect(hwnd, &mut window_rect).is_err() {
+            return (x, y, w, h);
+        }
+
+        let result = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame_rect as *mut RECT as *mut _,
+            mem::size_of::<RECT>() as u32,
+        );
+
+        if result.is_err() {
+            return (x, y, w, h);
+        }
+    }
+
+    // Calculate invisible border sizes
+    let border_left = frame_rect.left - window_rect.left;
+    let border_right = window_rect.right - frame_rect.right;
+    let border_top = frame_rect.top - window_rect.top;
+    let border_bottom = window_rect.bottom - frame_rect.bottom;
+
+    // Expand the SetWindowPos rect to compensate for invisible borders
+    (
+        x - border_left,
+        y - border_top,
+        w + border_left + border_right,
+        h + border_top + border_bottom,
+    )
 }
 
 /// Gets the accurate window bounds using DWM extended frame bounds.
@@ -153,15 +219,35 @@ pub fn get_window_class(hwnd: HWND) -> String {
 /// Sends WM_CLOSE to request the window to close gracefully.
 pub fn close_window(hwnd: HWND) {
     unsafe {
-        if let Err(e) = PostMessageW(hwnd, WM_CLOSE, None, None) {
+        use windows::Win32::Foundation::{WPARAM, LPARAM};
+        if let Err(e) = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) {
             log::warn!("PostMessageW(WM_CLOSE) failed for {:?}: {}", hwnd, e);
         }
     }
 }
 
 /// Brings the window to the foreground.
+///
+/// Uses AttachThreadInput trick to bypass Windows' SetForegroundWindow
+/// restrictions. Without this, SetForegroundWindow silently fails when
+/// our process doesn't currently own the foreground.
 pub fn set_foreground(hwnd: HWND) {
     unsafe {
+        let current_thread = GetCurrentThreadId();
+        let foreground_hwnd = GetForegroundWindow();
+
+        if foreground_hwnd.0 as isize != 0 {
+            let foreground_thread = GetWindowThreadProcessId(foreground_hwnd, None);
+
+            if foreground_thread != current_thread {
+                // Attach to the foreground thread's input to gain permission
+                let _ = AttachThreadInput(current_thread, foreground_thread, true);
+                let _ = SetForegroundWindow(hwnd);
+                let _ = AttachThreadInput(current_thread, foreground_thread, false);
+                return;
+            }
+        }
+
         let _ = SetForegroundWindow(hwnd);
     }
 }

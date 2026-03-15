@@ -20,6 +20,16 @@ fn main() {
     env_logger::init();
     log::info!("twm starting...");
 
+    // Set DPI awareness BEFORE any window/monitor operations.
+    // Without this, coordinates are wrong on high-DPI displays.
+    unsafe {
+        use windows::Win32::UI::HiDpi::{
+            SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        };
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        log::info!("DPI awareness set to per-monitor v2");
+    }
+
     // Load configuration
     let config = load_config();
     log::info!("Config loaded: {:?}", config.general);
