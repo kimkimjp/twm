@@ -2,7 +2,7 @@
 name = "twm"
 version = "0.1.0"
 edition = "2021"
-description = "A lightweight tiling window manager for Windows, inspired by i3"
+description = "A lightweight auto-tiling window manager for Windows"
 
 [dependencies]
 windows = { version = "0.58", features = [
@@ -14,7 +14,6 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
     "Win32_UI_Accessibility",
-    "Win32_System_LibraryLoader",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
