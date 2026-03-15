@@ -1,0 +1,28 @@
+[package]
+name = "twm"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight tiling window manager for Windows, inspired by i3"
+
+[dependencies]
+windows = { version = "0.58", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_System_LibraryLoader",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+log = "0.4"
+env_logger = "0.11"
+dirs = "6"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
