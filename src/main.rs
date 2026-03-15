@@ -106,6 +106,11 @@ fn main() {
     log::info!("Initial layout applied");
 
     // Win32 message loop
+    // Use a timer to periodically reinstall the keyboard hook as a safety net.
+    // Windows can silently remove WH_KEYBOARD_LL hooks if they timeout.
+    let hook_check_interval = std::time::Instant::now();
+    let mut last_hook_check = hook_check_interval;
+
     log::info!("Entering message loop");
     unsafe {
         let mut msg = MSG::default();
@@ -118,6 +123,13 @@ fn main() {
 
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
+
+            // Periodically ensure the keyboard hook is alive (every 5 seconds)
+            let now = std::time::Instant::now();
+            if now.duration_since(last_hook_check).as_secs() >= 5 {
+                windows_api::hotkey::ensure_hook_alive();
+                last_hook_check = now;
+            }
 
             // Process hotkey commands from the low-level keyboard hook
             let commands = windows_api::hotkey::drain_commands();
